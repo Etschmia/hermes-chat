@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X } from 'lucide-react';
 
 interface Chat {
   id: string;
@@ -22,6 +22,8 @@ export default function HermesChat() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   // Load from localStorage
   useEffect(() => {
@@ -71,6 +73,27 @@ export default function HermesChat() {
       chat.id === id ? { ...chat, pinned: !chat.pinned } : chat
     );
     setChats(updated);
+  };
+
+  const startRename = (chat: Chat) => {
+    setEditingChatId(chat.id);
+    setEditingTitle(chat.title);
+  };
+
+  const cancelRename = () => {
+    setEditingChatId(null);
+    setEditingTitle('');
+  };
+
+  const commitRename = () => {
+    if (!editingChatId) return;
+    const trimmed = editingTitle.trim();
+    if (trimmed) {
+      setChats(chats.map(chat =>
+        chat.id === editingChatId ? { ...chat, title: trimmed } : chat
+      ));
+    }
+    cancelRename();
   };
 
   const sendMessage = async () => {
@@ -199,27 +222,72 @@ export default function HermesChat() {
               }`}
             >
               <MessageCircle size={18} className={activeChatId === chat.id ? 'text-white' : 'text-[#128a63]'} />
-              
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm truncate pr-2">
-                  {chat.title}
-                </div>
-              </div>
 
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={(e) => { e.stopPropagation(); togglePin(chat.id); }}
-                  className="p-1.5 rounded-lg hover:bg-black/10"
-                >
-                  {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
-                  className="p-1.5 rounded-lg hover:bg-black/10 text-red-500"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              {editingChatId === chat.id ? (
+                <div className="flex-1 min-w-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitRename();
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                    onBlur={commitRename}
+                    className="flex-1 min-w-0 bg-white text-[#3a3a3a] border border-[#128a63] rounded-lg px-2 py-1 text-sm focus:outline-none"
+                  />
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); commitRename(); }}
+                    className="p-1.5 rounded-lg hover:bg-black/10 text-[#128a63]"
+                    title="Speichern"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); cancelRename(); }}
+                    className="p-1.5 rounded-lg hover:bg-black/10 text-[#6b6b6b]"
+                    title="Abbrechen"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="font-medium text-sm truncate pr-2"
+                      onDoubleClick={(e) => { e.stopPropagation(); startRename(chat); }}
+                      title="Doppelklick zum Umbenennen"
+                    >
+                      {chat.title}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); startRename(chat); }}
+                      className="p-1.5 rounded-lg hover:bg-black/10"
+                      title="Umbenennen"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); togglePin(chat.id); }}
+                      className="p-1.5 rounded-lg hover:bg-black/10"
+                      title={chat.pinned ? 'Lösen' : 'Anpinnen'}
+                    >
+                      {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
+                      className="p-1.5 rounded-lg hover:bg-black/10 text-red-500"
+                      title="Löschen"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
