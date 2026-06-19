@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hermes-ui — Lifecycle-Manager für die Hermes-Chat-UI (https://ui.martuni.de, :3100).
+# hermes-ui — Lifecycle-Manager für die Hermes-Chat-UI (https://chat.example.com, :3100).
 #
 # Hält die PID der von UNS gestarteten Instanz in einem Pidfile nach, damit
 # stop/restart nie den falschen Prozess suchen oder treffen. Sicherheitsnetz:

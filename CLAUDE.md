@@ -2,7 +2,7 @@
 
 # Hermes Chat — project architecture
 
-A Next.js 16 UI (served at **https://ui.martuni.de**) for chatting with the
+A Next.js 16 UI (served at **https://chat.example.com**) for chatting with the
 **local Hermes agent**. The chat history is persisted **server-side** (so it
 follows the user across devices); the browser's `localStorage` (key
 `hermes-chats`) is only a per-device cache for instant paint and offline use.
@@ -71,8 +71,8 @@ browser. If you rotate the gateway key, update `HERMES_API_KEY` here, then
 ## Run / deploy
 
 The app runs as a detached **production** build on port 3100, reverse-proxied by
-Caddy (`/etc/caddy/sites/ui.martuni.de.caddy`, behind HTTP basic_auth user
-`BotChef`).
+Caddy (`/etc/caddy/sites/chat.example.com.caddy`, behind HTTP basic_auth user
+`<basic-auth-user>`).
 
 Manage it with the lifecycle scripts (`~/bin`, dispatcher `hermes-ui`):
 

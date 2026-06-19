@@ -2,7 +2,7 @@
 
 Helper commands to build, start, stop and restart the Hermes Chat UI (the
 detached **production** server on `:3100`, reverse-proxied by Caddy at
-`https://ui.martuni.de`) **without hunting for PIDs** and **without ever touching
+`https://chat.example.com`) **without hunting for PIDs** and **without ever touching
 another service** on the box.
 
 The scripts live in [`../scripts/`](../scripts) (version-controlled here) and are
