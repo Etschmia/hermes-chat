@@ -1,26 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Depot Design System Tokens (angepasst) */
+  --background: oklch(0.977 0.008 84);
+  --foreground: oklch(0.245 0.012 56);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.245 0.012 56);
+  --primary: oklch(0.596 0.145 163);
+  --primary-foreground: oklch(0.985 0.001 106.423);
+  --secondary: oklch(0.95 0.026 163);
+  --secondary-foreground: oklch(0.378 0.077 168.94);
+  --muted: oklch(0.951 0.012 84);
+  --muted-foreground: oklch(0.52 0.018 60);
+  --border: oklch(0.912 0.014 84);
+  --ring: oklch(0.596 0.145 163);
+  --shadow-soft: 0 1px 2px oklch(0.25 0.04 70 / 0.05), 0 16px 40px -20px oklch(0.3 0.08 70 / 0.16);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Chat specific styles matching Depot aesthetic */
+.chat-message {
+  transition: all 0.1s ease;
+}
+
+.chat-input {
+  transition: border-color 0.2s ease;
+}
+
+.chat-input:focus {
+  border-color: var(--primary);
+  outline: none;
 }
