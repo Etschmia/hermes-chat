@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu } from 'lucide-react';
 
 interface Chat {
   id: string;
@@ -24,27 +24,144 @@ export default function HermesChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  // Mobile: the sidebar is an off-canvas drawer. On md+ it is always visible.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // True once the initial server load has settled — guards the save effect so
+  // an empty first render can never overwrite the server store.
+  const [loaded, setLoaded] = useState(false);
 
-  // Load from localStorage
+  const loadedRef = useRef(false);
+  const chatsRef = useRef<Chat[]>([]);
+  chatsRef.current = chats;
+  const pendingRef = useRef(false); // unsynced local changes?
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const pickActive = (list: Chat[]) =>
+    setActiveChatId(prev => (list.some(c => c.id === prev) ? prev : list[0]?.id ?? null));
+
+  // --- Load: localStorage cache first (instant paint), then the server store
+  //     (authoritative, so the history follows the user across devices). ------
   useEffect(() => {
-    const saved = localStorage.getItem('hermes-chats');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setChats(parsed);
-      if (parsed.length > 0) {
-        setActiveChatId(parsed[0].id);
+    let cancelled = false;
+
+    try {
+      const cached = localStorage.getItem('hermes-chats');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length) {
+          setChats(parsed);
+          pickActive(parsed);
+        }
       }
+    } catch {
+      /* ignore corrupt cache */
     }
+
+    (async () => {
+      try {
+        const res = await fetch('/api/chats', { cache: 'no-store' });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          const serverChats: Chat[] = Array.isArray(data.chats) ? data.chats : [];
+          // Empty server + non-empty local cache = first run after this feature
+          // shipped. Keep the local chats; the save effect migrates them up.
+          if (!(serverChats.length === 0 && chatsRef.current.length > 0)) {
+            setChats(serverChats);
+            pickActive(serverChats);
+          }
+        }
+      } catch {
+        /* offline → keep whatever the cache gave us */
+      } finally {
+        if (!cancelled) {
+          loadedRef.current = true;
+          setLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Save to localStorage
+  // --- Save: write the cache immediately, debounce the server sync. -----------
   useEffect(() => {
-    if (chats.length > 0) {
+    if (!loaded) return;
+    try {
       localStorage.setItem('hermes-chats', JSON.stringify(chats));
+    } catch {
+      /* quota / private mode — server is still the source of truth */
     }
-  }, [chats]);
+    pendingRef.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await fetch('/api/chats', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chats: chatsRef.current }),
+        });
+        pendingRef.current = false;
+      } catch {
+        /* stays pending; localStorage holds it, pagehide will retry */
+      }
+    }, 500);
+  }, [chats, loaded]);
+
+  // --- Sync on tab hide/show: flush pending writes when backgrounded, pull the
+  //     latest when the user returns (key for the desktop↔phone hand-off). -----
+  useEffect(() => {
+    const flush = () => {
+      if (!loadedRef.current || !pendingRef.current) return;
+      try {
+        fetch('/api/chats', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chats: chatsRef.current }),
+          keepalive: true, // allowed to outlive the page on unload
+        });
+        pendingRef.current = false;
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flush();
+        return;
+      }
+      // Back in the foreground with nothing unsynced → adopt the server state.
+      if (pendingRef.current) return;
+      fetch('/api/chats', { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (!data || !Array.isArray(data.chats) || pendingRef.current) return;
+          const serverChats: Chat[] = data.chats;
+          if (JSON.stringify(serverChats) !== JSON.stringify(chatsRef.current)) {
+            setChats(serverChats);
+            pickActive(serverChats);
+          }
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   const activeChat = chats.find(c => c.id === activeChatId);
+
+  // Keep the conversation pinned to the latest message.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [activeChat?.messages.length, isLoading]);
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -54,25 +171,27 @@ export default function HermesChat() {
       messages: [],
       createdAt: new Date().toISOString(),
     };
-    const updated = [newChat, ...chats];
-    setChats(updated);
+    setChats([newChat, ...chats]);
     setActiveChatId(newChat.id);
+    setSidebarOpen(false);
+  };
+
+  const selectChat = (id: string) => {
+    setActiveChatId(id);
+    setSidebarOpen(false);
   };
 
   const deleteChat = (id: string) => {
     const updated = chats.filter(c => c.id !== id);
     setChats(updated);
-    
+
     if (activeChatId === id) {
       setActiveChatId(updated.length > 0 ? updated[0].id : null);
     }
   };
 
   const togglePin = (id: string) => {
-    const updated = chats.map(chat =>
-      chat.id === id ? { ...chat, pinned: !chat.pinned } : chat
-    );
-    setChats(updated);
+    setChats(chats.map(chat => (chat.id === id ? { ...chat, pinned: !chat.pinned } : chat)));
   };
 
   const startRename = (chat: Chat) => {
@@ -89,9 +208,7 @@ export default function HermesChat() {
     if (!editingChatId) return;
     const trimmed = editingTitle.trim();
     if (trimmed) {
-      setChats(chats.map(chat =>
-        chat.id === editingChatId ? { ...chat, title: trimmed } : chat
-      ));
+      setChats(chats.map(chat => (chat.id === editingChatId ? { ...chat, title: trimmed } : chat)));
     }
     cancelRename();
   };
@@ -185,21 +302,44 @@ export default function HermesChat() {
   });
 
   return (
-    <div className="flex h-screen bg-[#f8f7f4] font-sans text-[#3a3a3a]">
-      {/* Sidebar */}
-      <div className="w-72 border-r border-[#e5e3dc] bg-white flex flex-col">
+    <div className="flex h-dvh overflow-hidden bg-[#f8f7f4] font-sans text-[#3a3a3a]">
+      {/* Backdrop — only on mobile while the drawer is open */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm md:hidden"
+        />
+      )}
+
+      {/* Sidebar — off-canvas drawer on mobile, static column on md+ */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-[84vw] max-w-xs flex-col border-r border-[#e5e3dc] bg-white transition-transform duration-300 ease-out md:static md:z-auto md:w-72 md:max-w-none md:translate-x-0 md:shadow-none ${
+          sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+        }`}
+      >
         <div className="p-4 border-b border-[#e5e3dc]">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-semibold text-lg tracking-tight">Hermes</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-display font-semibold text-lg tracking-tight">Hermes</div>
               <div className="text-xs text-[#6b6b6b]">Martuni UI</div>
             </div>
-            <button
-              onClick={createNewChat}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#128a63] text-white text-sm font-medium hover:bg-[#0f7554] transition-colors"
-            >
-              <Plus size={16} /> Neu
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={createNewChat}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#128a63] text-white text-sm font-medium hover:bg-[#0f7554] transition-colors"
+              >
+                <Plus size={16} /> Neu
+              </button>
+              {/* Close drawer — mobile only */}
+              <button
+                onClick={() => setSidebarOpen(false)}
+                aria-label="Seitenleiste schließen"
+                className="md:hidden p-2 rounded-xl text-[#6b6b6b] hover:bg-[#f1f0eb] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -214,14 +354,14 @@ export default function HermesChat() {
           {sortedChats.map(chat => (
             <div
               key={chat.id}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => selectChat(chat.id)}
               className={`group flex items-center gap-3 px-3 py-3 rounded-2xl cursor-pointer transition-all ${
-                activeChatId === chat.id 
-                  ? 'bg-[#128a63] text-white' 
+                activeChatId === chat.id
+                  ? 'bg-[#128a63] text-white'
                   : 'hover:bg-[#f1f0eb]'
               }`}
             >
-              <MessageCircle size={18} className={activeChatId === chat.id ? 'text-white' : 'text-[#128a63]'} />
+              <MessageCircle size={18} className={`shrink-0 ${activeChatId === chat.id ? 'text-white' : 'text-[#128a63]'}`} />
 
               {editingChatId === chat.id ? (
                 <div className="flex-1 min-w-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -234,7 +374,7 @@ export default function HermesChat() {
                       if (e.key === 'Escape') cancelRename();
                     }}
                     onBlur={commitRename}
-                    className="flex-1 min-w-0 bg-white text-[#3a3a3a] border border-[#128a63] rounded-lg px-2 py-1 text-sm focus:outline-none"
+                    className="flex-1 min-w-0 bg-white text-[#3a3a3a] border border-[#128a63] rounded-lg px-2 py-1 text-base md:text-sm focus:outline-none"
                   />
                   <button
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); commitRename(); }}
@@ -255,7 +395,7 @@ export default function HermesChat() {
                 <>
                   <div className="flex-1 min-w-0">
                     <div
-                      className="font-medium text-sm truncate pr-2"
+                      className="font-medium text-sm truncate pr-1"
                       onDoubleClick={(e) => { e.stopPropagation(); startRename(chat); }}
                       title="Doppelklick zum Umbenennen"
                     >
@@ -263,24 +403,25 @@ export default function HermesChat() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Actions: always visible on touch, hover-revealed on desktop */}
+                  <div className="flex items-center gap-0.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={(e) => { e.stopPropagation(); startRename(chat); }}
-                      className="p-1.5 rounded-lg hover:bg-black/10"
+                      className="p-2 md:p-1.5 rounded-lg hover:bg-black/10"
                       title="Umbenennen"
                     >
                       <Pencil size={14} />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); togglePin(chat.id); }}
-                      className="p-1.5 rounded-lg hover:bg-black/10"
+                      className="p-2 md:p-1.5 rounded-lg hover:bg-black/10"
                       title={chat.pinned ? 'Lösen' : 'Anpinnen'}
                     >
                       {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
-                      className="p-1.5 rounded-lg hover:bg-black/10 text-red-500"
+                      className={`p-2 md:p-1.5 rounded-lg hover:bg-black/10 ${activeChatId === chat.id ? 'text-red-200' : 'text-red-500'}`}
                       title="Löschen"
                     >
                       <Trash2 size={14} />
@@ -293,26 +434,37 @@ export default function HermesChat() {
         </div>
 
         <div className="p-3 border-t border-[#e5e3dc] text-[10px] text-[#8a8a8a] text-center">
-          Chats werden lokal gespeichert
+          Chats werden geräteübergreifend gespeichert
         </div>
-      </div>
+      </aside>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top bar — always present so the menu button is reachable */}
+        <div className="h-14 shrink-0 border-b border-[#e5e3dc] px-3 md:px-6 flex items-center gap-3 bg-white">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Seitenleiste öffnen"
+            className="md:hidden p-2 -ml-1 rounded-xl text-[#3a3a3a] hover:bg-[#f1f0eb] transition-colors"
+          >
+            <Menu size={22} />
+          </button>
+          <div className="font-semibold truncate min-w-0">
+            {activeChat ? activeChat.title : 'Hermes'}
+          </div>
+          {activeChat && (
+            <div className="ml-auto shrink-0 text-xs px-3 py-1 rounded-full bg-[#f1f0eb] text-[#6b6b6b]">
+              {activeChat.messages.length} Nachrichten
+            </div>
+          )}
+        </div>
+
         {activeChat ? (
           <>
-            {/* Header */}
-            <div className="h-14 border-b border-[#e5e3dc] px-6 flex items-center justify-between bg-white">
-              <div className="font-semibold">{activeChat.title}</div>
-              <div className="text-xs px-3 py-1 rounded-full bg-[#f1f0eb] text-[#6b6b6b]">
-                {activeChat.messages.length} Nachrichten
-              </div>
-            </div>
-
             {/* Messages */}
-            <div className="flex-1 overflow-auto p-6 space-y-6 bg-[#f8f7f4]">
+            <div ref={scrollRef} className="flex-1 overflow-auto p-4 md:p-6 space-y-5 md:space-y-6 bg-[#f8f7f4]">
               {activeChat.messages.length === 0 && (
-                <div className="h-full flex items-center justify-center text-[#6b6b6b] text-sm">
+                <div className="h-full flex items-center justify-center text-center text-[#6b6b6b] text-sm px-4">
                   Starte die Unterhaltung mit Hermes
                 </div>
               )}
@@ -323,7 +475,7 @@ export default function HermesChat() {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[70%] px-5 py-3.5 rounded-3xl text-sm leading-relaxed ${
+                    className={`max-w-[85%] md:max-w-[70%] px-4 md:px-5 py-3 md:py-3.5 rounded-3xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                       msg.role === 'user'
                         ? 'bg-[#128a63] text-white rounded-br-md'
                         : 'bg-white border border-[#e5e3dc] rounded-bl-md'
@@ -344,20 +496,20 @@ export default function HermesChat() {
             </div>
 
             {/* Input */}
-            <div className="border-t border-[#e5e3dc] bg-white p-4">
-              <div className="flex gap-3 max-w-4xl mx-auto">
+            <div className="shrink-0 border-t border-[#e5e3dc] bg-white p-3 md:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <div className="flex gap-2 md:gap-3 max-w-4xl mx-auto">
                 <input
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                   placeholder="Nachricht an Hermes..."
-                  className="flex-1 bg-[#f8f7f4] border border-[#e5e3dc] rounded-2xl px-5 py-3 text-sm focus:outline-none focus:border-[#128a63]"
+                  className="flex-1 min-w-0 bg-[#f8f7f4] border border-[#e5e3dc] rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-[#128a63]"
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!input.trim() || isLoading}
-                  className="px-6 rounded-2xl bg-[#128a63] text-white disabled:opacity-50 flex items-center gap-2 hover:bg-[#0f7554] transition-colors"
+                  className="px-5 md:px-6 rounded-2xl bg-[#128a63] text-white disabled:opacity-50 flex items-center justify-center hover:bg-[#0f7554] transition-colors"
                 >
                   <Send size={18} />
                 </button>
@@ -365,10 +517,16 @@ export default function HermesChat() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-[#6b6b6b]">
+          <div className="flex-1 flex items-center justify-center text-[#6b6b6b] p-6">
             <div className="text-center">
               <MessageCircle size={48} className="mx-auto mb-4 opacity-40" />
-              <p>Erstelle einen neuen Chat um zu beginnen</p>
+              <p className="mb-4">Erstelle einen neuen Chat um zu beginnen</p>
+              <button
+                onClick={createNewChat}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#128a63] text-white text-sm font-medium hover:bg-[#0f7554] transition-colors"
+              >
+                <Plus size={16} /> Neuer Chat
+              </button>
             </div>
           </div>
         )}

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Wrapper → hermes-ui restart  (Lifecycle der Hermes-Chat-UI, :3100)
+exec "$HOME/bin/hermes-ui" restart "$@"

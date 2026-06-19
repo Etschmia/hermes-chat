@@ -16,14 +16,22 @@
   --ring: oklch(0.596 0.145 163);
   --shadow-soft: 0 1px 2px oklch(0.25 0.04 70 / 0.05), 0 16px 40px -20px oklch(0.3 0.08 70 / 0.16);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-schibsted), -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), var(--font-schibsted), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  /* Avoid the iOS rubber-band/extra-scroll while the chat manages its own
+     scroll regions inside a 100dvh shell. */
+  overscroll-behavior: none;
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 /* Chat specific styles matching Depot aesthetic */

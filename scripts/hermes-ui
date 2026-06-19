@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# hermes-ui — Lifecycle-Manager für die Hermes-Chat-UI (https://ui.martuni.de, :3100).
+#
+# Hält die PID der von UNS gestarteten Instanz in einem Pidfile nach, damit
+# stop/restart nie den falschen Prozess suchen oder treffen. Sicherheitsnetz:
+# bevor irgendetwas via Port gefunden/getötet wird, prüfen wir das cwd des
+# Prozesses == App-Verzeichnis — depot3 (:3045), Nextra usw. bleiben unangetastet.
+#
+# Befehle:  build | start | stop | restart | status | log
+# Bequeme Wrapper in ~/bin:  ui-build  ui-start  ui-stop  ui-restart
+set -uo pipefail
+
+APP_DIR="/home/librechat/hermes-chat"
+PORT=3100
+PIDFILE="$HOME/.hermes/ui.pid"
+LOGFILE="$APP_DIR/server.log"
+BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+
+mkdir -p "$(dirname "$PIDFILE")"
+
+c_g=$'\033[32m'; c_r=$'\033[31m'; c_d=$'\033[2m'; c_0=$'\033[0m'
+info(){ printf '%s\n' "$*"; }
+ok(){   printf '%s%s%s\n' "$c_g" "$*" "$c_0"; }
+err(){  printf '%s%s%s\n' "$c_r" "$*" "$c_0" >&2; }
+
+# --- helpers ---------------------------------------------------------------
+
+# PID aus dem Pidfile, falls der Prozess noch lebt.
+running_pid() {
+  [ -f "$PIDFILE" ] || return 1
+  local pid; pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+  [ -n "${pid:-}" ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  printf '%s' "$pid"
+}
+
+# PID, die gerade auf $PORT lauscht — ABER nur, wenn ihr cwd unser App-Dir ist.
+# Verhindert, dass wir je einen fremden Dienst anfassen, der den Port hält.
+listener_pid_if_ours() {
+  local pid cwd
+  pid="$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)"
+  [ -n "${pid:-}" ] || return 1
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [ "$cwd" = "$APP_DIR" ] || return 1
+  printf '%s' "$pid"
+}
+
+# Lauscht (irgend)jemand auf dem Port?
+port_busy() { ss -ltn 2>/dev/null | grep -q ":$PORT "; }
+
+health() { curl -s -m 3 -o /dev/null -w '%{http_code}' "http://localhost:$PORT" 2>/dev/null || echo 000; }
+
+# Ganze Prozessgruppe der PID beenden (setsid macht den Starter zum Gruppenleiter,
+# alle Kinder erben dessen PGID — so erwischt ein Signal den kompletten Baum).
+kill_tree() {
+  local pid="$1" sig="$2" pgid
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  if [ -n "${pgid:-}" ]; then
+    kill -"$sig" -"$pgid" 2>/dev/null || kill -"$sig" "$pid" 2>/dev/null || true
+  else
+    kill -"$sig" "$pid" 2>/dev/null || true
+  fi
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_build() {
+  info "→ Build in $APP_DIR ..."
+  ( cd "$APP_DIR" && "$BUN" run build ) || { err "✗ Build fehlgeschlagen"; return 1; }
+  ok "✓ Build fertig — danach 'ui-restart' für die neue Version."
+}
+
+cmd_start() {
+  local pid
+  if pid="$(running_pid)"; then err "Läuft bereits (pid $pid). Nutze 'ui-restart'."; return 1; fi
+  if pid="$(listener_pid_if_ours)"; then
+    printf '%s\n' "$pid" > "$PIDFILE"
+    ok "✓ Lief schon (pid $pid) — in Pidfile übernommen."
+    return 0
+  fi
+  if port_busy; then err "Port $PORT ist belegt — aber NICHT von uns. Abbruch (depot3/anderer Dienst?)."; return 1; fi
+
+  info "→ Starte (PORT=$PORT, production, detached) ..."
+  cd "$APP_DIR" || { err "App-Dir nicht erreichbar: $APP_DIR"; return 1; }
+  setsid env PORT="$PORT" NODE_ENV=production "$BUN" run start >"$LOGFILE" 2>&1 < /dev/null &
+  local newpid=$!
+  printf '%s\n' "$newpid" > "$PIDFILE"
+
+  local code=000 i
+  for i in $(seq 1 40); do
+    if ! kill -0 "$newpid" 2>/dev/null; then
+      err "✗ Prozess sofort beendet — letzte Logzeilen:"; tail -n 15 "$LOGFILE" >&2; rm -f "$PIDFILE"; return 1
+    fi
+    code="$(health)"; [ "$code" = "200" ] && break
+    sleep 0.25
+  done
+  if [ "$code" = "200" ]; then
+    ok "✓ Läuft (pid $newpid)  →  http://localhost:$PORT"
+  else
+    err "Gestartet, aber keine 200 (zuletzt $code). Log: $LOGFILE"; return 1
+  fi
+}
+
+cmd_stop() {
+  local pid
+  if pid="$(running_pid)"; then :
+  elif pid="$(listener_pid_if_ours)"; then info "(kein/veraltetes Pidfile — via Port erkannt: pid $pid)"
+  else info "Nicht aktiv."; rm -f "$PIDFILE"; return 0
+  fi
+
+  info "→ Stoppe pid $pid (Prozessgruppe) ..."
+  kill_tree "$pid" TERM
+  local i gone=0
+  for i in $(seq 1 25); do kill -0 "$pid" 2>/dev/null || { gone=1; break; }; sleep 0.2; done
+  if [ "$gone" != 1 ]; then info "  reagiert nicht — hart beenden (KILL) ..."; kill_tree "$pid" KILL; sleep 0.3; fi
+  rm -f "$PIDFILE"
+  ok "✓ Gestoppt"
+}
+
+cmd_restart() { cmd_stop; cmd_start; }
+
+cmd_status() {
+  local pid src=""
+  if pid="$(running_pid)"; then src="pidfile"
+  elif pid="$(listener_pid_if_ours)"; then src="port"
+  fi
+  if [ -n "${pid:-}" ]; then
+    local code; code="$(health)"
+    ok   "● läuft   pid $pid  ($src)"
+    info "  ${c_d}URL${c_0}    http://localhost:$PORT   ${c_d}HTTP${c_0} $code"
+    info "  ${c_d}Log${c_0}    $LOGFILE"
+  else
+    err  "○ gestoppt"
+    info "  ${c_d}Log${c_0}    $LOGFILE"
+    return 1
+  fi
+}
+
+cmd_log() { info "→ tail -f $LOGFILE  (Strg-C zum Beenden)"; tail -n 40 -f "$LOGFILE"; }
+
+# --- dispatch --------------------------------------------------------------
+
+case "${1:-status}" in
+  build)            cmd_build ;;
+  start)            cmd_start ;;
+  stop)             cmd_stop ;;
+  restart|reload)   cmd_restart ;;
+  status|"")        cmd_status ;;
+  log|logs)         cmd_log ;;
+  *) err "Unbekannt: $1"; info "Nutze: hermes-ui {build|start|stop|restart|status|log}"; exit 2 ;;
+esac
