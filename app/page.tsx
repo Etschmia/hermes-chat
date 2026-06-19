@@ -98,31 +98,29 @@ export default function HermesChat() {
     setInput('');
     setIsLoading(true);
 
-    // Real Hermes API call (OpenAI compatible)
     try {
-      const base = process.env.NEXT_PUBLIC_HERMES_API_BASE || 'http://localhost:8080/v1';
-      const model = process.env.NEXT_PUBLIC_HERMES_MODEL || 'grok-4.3';
-
-      const response = await fetch(`${base}/chat/completions`, {
+      // Call our internal API route (server-side, no CORS issues). The model is
+      // chosen by the server (HERMES_MODEL), so the client doesn't pin one.
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Add Authorization header here if your Hermes instance requires a key
-          // 'Authorization': `Bearer ${process.env.NEXT_PUBLIC_HERMES_API_KEY}`,
         },
         body: JSON.stringify({
-          model,
           messages: [
             ...activeChat!.messages.map(m => ({ role: m.role, content: m.content })),
             { role: 'user', content: userMessage.content }
           ],
-          stream: false,
         }),
       });
 
-      if (!response.ok) throw new Error('Hermes API error');
+      const data = await response.json().catch(() => ({}));
 
-      const data = await response.json();
+      if (!response.ok) {
+        const reason = data?.detail || data?.error || `HTTP ${response.status}`;
+        throw new Error(reason);
+      }
+
       const assistantContent = data.choices?.[0]?.message?.content || 'Keine Antwort erhalten.';
 
       const assistantMessage: Message = {
@@ -139,10 +137,11 @@ export default function HermesChat() {
       });
       setChats(finalChats);
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unbekannter Fehler';
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(36),
         role: 'assistant',
-        content: 'Fehler bei der Verbindung zu Hermes. Bitte prüfe die API-Konfiguration.',
+        content: `⚠️ Fehler bei der Verbindung zu Hermes: ${detail}`,
       };
       const finalChats = updatedChats.map(chat => {
         if (chat.id === activeChatId) {
