@@ -47,3 +47,28 @@ body {
   border-color: var(--primary);
   outline: none;
 }
+
+/* Hermes "thinking" spinner — not part of the Depot Design System, developed to
+   match it: a rotating ring in the primary green over a faint same-hue track. */
+.hermes-spinner {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 9999px;
+  border: 2.5px solid color-mix(in oklch, var(--primary) 20%, transparent);
+  border-top-color: var(--primary);
+  animation: hermes-spin 0.7s linear infinite;
+  will-change: transform;
+}
+
+@keyframes hermes-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect reduced-motion: slow the spin to a gentle, non-distracting turn. */
+@media (prefers-reduced-motion: reduce) {
+  .hermes-spinner {
+    animation-duration: 1.8s;
+  }
+}

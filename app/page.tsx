@@ -462,7 +462,7 @@ export default function HermesChat() {
         {activeChat ? (
           <>
             {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-auto p-4 md:p-6 space-y-5 md:space-y-6 bg-[#f8f7f4]">
+            <div ref={scrollRef} className="flex-1 overflow-auto p-4 md:p-6 space-y-2.5 md:space-y-3 bg-[#f8f7f4]">
               {activeChat.messages.length === 0 && (
                 <div className="h-full flex items-center justify-center text-center text-[#6b6b6b] text-sm px-4">
                   Starte die Unterhaltung mit Hermes
@@ -475,7 +475,7 @@ export default function HermesChat() {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] md:max-w-[70%] px-4 md:px-5 py-3 md:py-3.5 rounded-3xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                    className={`max-w-[85%] md:max-w-[70%] px-3.5 md:px-4 py-2 md:py-2.5 rounded-3xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                       msg.role === 'user'
                         ? 'bg-[#128a63] text-white rounded-br-md'
                         : 'bg-white border border-[#e5e3dc] rounded-bl-md'
@@ -488,8 +488,13 @@ export default function HermesChat() {
 
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="px-5 py-3.5 rounded-3xl bg-white border border-[#e5e3dc] text-sm text-[#6b6b6b]">
-                    Hermes denkt nach...
+                  <div
+                    className="flex items-center gap-2.5 px-1.5 py-1 text-[#6b6b6b]"
+                    role="status"
+                    aria-label="Hermes denkt nach"
+                  >
+                    <span className="hermes-spinner" aria-hidden />
+                    <span className="text-xs">Hermes denkt nach…</span>
                   </div>
                 </div>
               )}
