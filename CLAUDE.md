@@ -39,6 +39,24 @@ Browser (app/page.tsx)
   file. Returning to a foreground tab with nothing unsynced re-pulls the server
   state so two devices converge.
 
+## Attachments (images + files)
+
+The composer supports **clipboard image paste** and a **+ button** file picker
+(`app/lib/attachments.ts`, staged in `app/page.tsx`). Two paths:
+
+- **Images** → downscaled in-browser to ≤1280px JPEG (a phone screenshot is MBs
+  raw; the whole history is re-sent every turn, so this matters), then sent as
+  OpenAI `image_url` data-URL parts. **The gateway really sees them** — verified
+  live. Constraints it enforces: ≥8px per side **and ≥512px total**.
+- **Text-like files** (txt/md/csv/json/code/…) → inlined into the message text.
+  Other binary types are rejected in the UI.
+
+`toApiContent()` builds a plain string when there are no images, else the
+multimodal parts array. The `/api/chat` proxy forwards `messages` verbatim, so
+**no server change is needed** for attachments. Attachments live inside each
+`Message` (`attachments?: Attachment[]`) and thus persist in the chat store —
+images bloat it, so it's downscaled JPEG, not the original.
+
 ## The Hermes gateway
 
 - Runs as the systemd **user** service `hermes-gateway.service`

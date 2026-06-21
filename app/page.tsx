@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText } from 'lucide-react';
+import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
 
 interface Chat {
   id: string;
@@ -15,6 +16,7 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  attachments?: Attachment[];
 }
 
 export default function HermesChat() {
@@ -24,6 +26,10 @@ export default function HermesChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  // Attachments staged in the composer, plus a transient note for rejected files.
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Mobile: the sidebar is an off-canvas drawer. On md+ it is always visible.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // True once the initial server load has settled — guards the save effect so
@@ -213,13 +219,47 @@ export default function HermesChat() {
     cancelRename();
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || !activeChatId) return;
+  // Turn picked/pasted/dropped files into staged attachments (or surface why not).
+  const addFiles = async (list: FileList | File[] | null | undefined) => {
+    const arr = Array.from(list ?? []);
+    if (arr.length === 0) return;
+    setAttachError(null);
+    const results = await Promise.all(arr.map(fileToAttachment));
+    const atts = results.map(r => r.att).filter((a): a is Attachment => !!a);
+    const errs = results.map(r => r.error).filter((e): e is string => !!e);
+    if (atts.length) setPending(p => [...p, ...atts]);
+    if (errs.length) {
+      setAttachError(errs.join(' · '));
+      setTimeout(() => setAttachError(null), 6000);
+    }
+  };
 
+  // Paste handler: grab image/file blobs from the clipboard; leave text pastes
+  // to the input's default behaviour.
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const files = items
+      .filter(it => it.kind === 'file')
+      .map(it => it.getAsFile())
+      .filter((f): f is File => !!f);
+    if (files.length) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  };
+
+  const removePending = (id: string) => setPending(p => p.filter(a => a.id !== id));
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if ((!text && pending.length === 0) || !activeChatId || isLoading) return;
+
+    const atts = pending;
     const userMessage: Message = {
       id: Date.now().toString(36),
       role: 'user',
-      content: input.trim(),
+      content: text,
+      attachments: atts.length ? atts : undefined,
     };
 
     // Update chat with user message
@@ -229,29 +269,31 @@ export default function HermesChat() {
         return {
           ...chat,
           messages: newMessages,
-          title: chat.messages.length === 0 ? input.trim().slice(0, 40) : chat.title,
+          title: chat.messages.length === 0 ? (text.slice(0, 40) || atts[0]?.name || '📎 Anhang') : chat.title,
         };
       }
       return chat;
     });
     setChats(updatedChats);
     setInput('');
+    setPending([]);
     setIsLoading(true);
 
     try {
       // Call our internal API route (server-side, no CORS issues). The model is
       // chosen by the server (HERMES_MODEL), so the client doesn't pin one.
+      // Each message is mapped to a plain string or OpenAI multimodal parts
+      // (images as image_url, text files inlined) — the gateway accepts both.
+      const apiMessages = updatedChats
+        .find(c => c.id === activeChatId)!
+        .messages.map(m => ({ role: m.role, content: toApiContent(m.content, m.attachments) }));
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: [
-            ...activeChat!.messages.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMessage.content }
-          ],
-        }),
+        body: JSON.stringify({ messages: apiMessages }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -481,7 +523,34 @@ export default function HermesChat() {
                         : 'bg-white border border-[#e5e3dc] rounded-bl-md'
                     }`}
                   >
-                    {msg.content}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className={`flex flex-wrap gap-2 ${msg.content ? 'mb-2' : ''}`}>
+                        {msg.attachments.map(a =>
+                          a.kind === 'image' ? (
+                            <a key={a.id} href={a.dataUrl} target="_blank" rel="noopener noreferrer" className="block">
+                              {/* eslint-disable-next-line @next/next/no-img-element -- data-URL attachment, next/image is inappropriate */}
+                              <img
+                                src={a.dataUrl}
+                                alt={a.name}
+                                className="max-h-44 max-w-[12rem] rounded-lg border border-black/10 object-cover"
+                              />
+                            </a>
+                          ) : (
+                            <span
+                              key={a.id}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${
+                                msg.role === 'user' ? 'bg-white/15' : 'bg-[#f1f0eb] text-[#3a3a3a]'
+                              }`}
+                              title={a.name}
+                            >
+                              <FileText size={13} className="shrink-0" />
+                              <span className="truncate max-w-[10rem]">{a.name}</span>
+                            </span>
+                          )
+                        )}
+                      </div>
+                    )}
+                    {msg.content && <div>{msg.content}</div>}
                   </div>
                 </div>
               ))}
@@ -502,22 +571,78 @@ export default function HermesChat() {
 
             {/* Input */}
             <div className="shrink-0 border-t border-[#e5e3dc] bg-white p-3 md:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              <div className="flex gap-2 md:gap-3 max-w-4xl mx-auto">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Nachricht an Hermes..."
-                  className="flex-1 min-w-0 bg-[#f8f7f4] border border-[#e5e3dc] rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-[#128a63]"
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={!input.trim() || isLoading}
-                  className="px-5 md:px-6 rounded-2xl bg-[#128a63] text-white disabled:opacity-50 flex items-center justify-center hover:bg-[#0f7554] transition-colors"
-                >
-                  <Send size={18} />
-                </button>
+              <div className="max-w-4xl mx-auto">
+                {/* Staged attachments (pre-send preview) */}
+                {pending.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {pending.map(a => (
+                      <div key={a.id} className="relative">
+                        {a.kind === 'image' ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- data-URL attachment, next/image is inappropriate
+                          <img
+                            src={a.dataUrl}
+                            alt={a.name}
+                            className="h-16 w-16 rounded-lg border border-[#e5e3dc] object-cover"
+                          />
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1.5 h-16 px-3 rounded-lg border border-[#e5e3dc] bg-[#f8f7f4] text-xs text-[#3a3a3a]"
+                            title={a.name}
+                          >
+                            <FileText size={14} className="shrink-0 text-[#128a63]" />
+                            <span className="truncate max-w-[8rem]">{a.name}</span>
+                          </span>
+                        )}
+                        <button
+                          onClick={() => removePending(a.id)}
+                          aria-label={`${a.name} entfernen`}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#3a3a3a] text-white flex items-center justify-center shadow hover:bg-black"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {attachError && <div className="mb-2 text-xs text-red-500">{attachError}</div>}
+
+                <div className="flex gap-2 md:gap-3 items-end">
+                  {/* Hidden picker + plus button */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.sh,.sql,.toml,.ini,.conf,.log,.env"
+                    className="hidden"
+                    onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Datei anhängen"
+                    title="Bild oder Datei anhängen"
+                    className="shrink-0 w-11 h-11 rounded-2xl border border-[#e5e3dc] bg-[#f8f7f4] text-[#128a63] flex items-center justify-center hover:bg-[#f1f0eb] transition-colors"
+                  >
+                    <Plus size={20} />
+                  </button>
+
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                    onPaste={handlePaste}
+                    placeholder="Nachricht an Hermes…"
+                    className="flex-1 min-w-0 bg-[#f8f7f4] border border-[#e5e3dc] rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-[#128a63]"
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={(!input.trim() && pending.length === 0) || isLoading}
+                    className="shrink-0 w-11 h-11 md:w-auto md:px-6 rounded-2xl bg-[#128a63] text-white disabled:opacity-50 flex items-center justify-center hover:bg-[#0f7554] transition-colors"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
               </div>
             </div>
           </>
