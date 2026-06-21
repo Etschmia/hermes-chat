@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload } from 'lucide-react';
 import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
 
 interface Chat {
@@ -30,6 +30,10 @@ export default function HermesChat() {
   const [pending, setPending] = useState<Attachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Drag & drop: a depth counter rides out dragleave events fired when the
+  // cursor crosses child elements, so the overlay doesn't flicker.
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepth = useRef(0);
   // Mobile: the sidebar is an off-canvas drawer. On md+ it is always visible.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // True once the initial server load has settled — guards the save effect so
@@ -249,6 +253,37 @@ export default function HermesChat() {
   };
 
   const removePending = (id: string) => setPending(p => p.filter(a => a.id !== id));
+
+  // Only react to OS file drags (not text/element drags inside the page).
+  const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragging(true);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setIsDragging(false);
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragging(false);
+    if (!activeChatId) createNewChat(); // dropping with no chat open starts one
+    addFiles(e.dataTransfer.files);
+  };
 
   const sendMessage = async () => {
     const text = input.trim();
@@ -481,7 +516,23 @@ export default function HermesChat() {
       </aside>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div
+        className="relative flex-1 flex flex-col min-w-0"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {/* Drag & drop overlay — visual only; the drop is handled on the column */}
+        {isDragging && (
+          <div className="absolute inset-0 z-20 m-2 rounded-2xl border-2 border-dashed border-[#128a63] bg-[#128a63]/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-[#128a63]">
+              <Upload size={28} />
+              <div className="text-sm font-medium">Dateien hier ablegen</div>
+            </div>
+          </div>
+        )}
+
         {/* Top bar — always present so the menu button is reachable */}
         <div className="h-14 shrink-0 border-b border-[#e5e3dc] px-3 md:px-6 flex items-center gap-3 bg-white">
           <button
