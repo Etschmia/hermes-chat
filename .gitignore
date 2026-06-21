@@ -42,3 +42,7 @@ next-env.d.ts
 
 # detached prod server log
 server.log
+
+# local Claude Code session transcript — contains infra details (host,
+# basic-auth user, key handling) deliberately kept out of this public repo
+fic.txt
