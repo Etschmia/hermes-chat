@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download } from 'lucide-react';
 import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
 
 interface Chat {
@@ -17,6 +17,54 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   attachments?: Attachment[];
+}
+
+// Resolve a Markdown image target to something the browser can load. http/data
+// URLs are used as-is; a local server path (what the agent returns for a
+// generated image) is routed through /api/genimage, which serves it safely.
+function imageSrc(p: string, download = false): string {
+  if (/^(https?:|data:)/i.test(p)) return p;
+  const clean = p.replace(/^file:\/\//, '');
+  return `/api/genimage?path=${encodeURIComponent(clean)}${download ? '&download=1' : ''}`;
+}
+
+// Render message text, turning Markdown images `![alt](src)` into inline images
+// with a "download original" link. Everything else stays plain text (the bubble
+// is whitespace-pre-wrap). This is what makes generated images show up instead
+// of a bare path.
+function MessageBody({ content }: { content: string }) {
+  const nodes: React.ReactNode[] = [];
+  const re = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m.index > last) nodes.push(<span key={key++}>{content.slice(last, m.index)}</span>);
+    const alt = m[1] || 'Bild';
+    const url = m[2].trim().split(/\s+/)[0]; // drop an optional "title"
+    const view = imageSrc(url, false);
+    const dl = imageSrc(url, true);
+    const fname = (url.split('/').pop() || 'bild').replace(/[?#].*$/, '');
+    nodes.push(
+      <span key={key++} className="block my-1.5">
+        <a href={view} target="_blank" rel="noopener noreferrer" className="block">
+          {/* eslint-disable-next-line @next/next/no-img-element -- dynamic generated image, next/image is inappropriate */}
+          <img src={view} alt={alt} className="max-h-80 max-w-full rounded-lg border border-black/10" />
+        </a>
+        <a
+          href={dl}
+          download={fname}
+          className="mt-1 inline-flex items-center gap-1 text-xs text-[#6b6b6b] hover:text-[#128a63] transition-colors"
+          title="In Originalgröße herunterladen"
+        >
+          <Download size={14} /> Original
+        </a>
+      </span>
+    );
+    last = re.lastIndex;
+  }
+  if (last < content.length) nodes.push(<span key={key++}>{content.slice(last)}</span>);
+  return <>{nodes}</>;
 }
 
 export default function HermesChat() {
@@ -601,7 +649,7 @@ export default function HermesChat() {
                         )}
                       </div>
                     )}
-                    {msg.content && <div>{msg.content}</div>}
+                    {msg.content && <div><MessageBody content={msg.content} /></div>}
                   </div>
                 </div>
               ))}

@@ -57,6 +57,18 @@ multimodal parts array. The `/api/chat` proxy forwards `messages` verbatim, so
 `Message` (`attachments?: Attachment[]`) and thus persist in the chat store —
 images bloat it, so it's downscaled JPEG, not the original.
 
+### Generated images
+
+When the agent *generates* an image it returns a Markdown image in the assistant
+text with a **local server path** (`![alt](~/.hermes/cache/images/…jpg)`), which
+the browser can't load. `MessageBody` in `app/page.tsx` parses Markdown images
+and renders them inline (with a "download original" link); local paths are
+served by **`app/api/genimage/route.ts`**. That route only serves files whose
+real path is inside an allowlist of Hermes image dirs (`HERMES_IMAGE_DIRS` to
+override) and whose extension is an image type — so no path traversal, no
+leaking `config.yaml`/`auth.json` (verified: those return 404). `?download=1`
+forces a save-as with the original filename.
+
 ## The Hermes gateway
 
 - Runs as the systemd **user** service `hermes-gateway.service`
