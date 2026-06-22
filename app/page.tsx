@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon } from 'lucide-react';
 import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
 
 interface Chat {
@@ -54,7 +54,7 @@ function MessageBody({ content }: { content: string }) {
         <a
           href={dl}
           download={fname}
-          className="mt-1 inline-flex items-center gap-1 text-xs text-[#6b6b6b] hover:text-[#128a63] transition-colors"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand transition-colors"
           title="In Originalgröße herunterladen"
         >
           <Download size={14} /> Original
@@ -87,6 +87,11 @@ export default function HermesChat() {
   // True once the initial server load has settled — guards the save effect so
   // an empty first render can never overwrite the server store.
   const [loaded, setLoaded] = useState(false);
+  // Theme toggle. The inline script in layout.tsx has already set data-theme on
+  // <html> before paint (from localStorage / OS pref); we start from a fixed
+  // 'light' so the first client render matches the server HTML (no hydration
+  // mismatch on the toggle icon), then adopt the real value after mount.
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   const loadedRef = useRef(false);
   const chatsRef = useRef<Chat[]>([]);
@@ -213,6 +218,27 @@ export default function HermesChat() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  // Adopt the theme the inline script resolved before paint, then keep React in
+  // sync. Done in an effect (not the useState initializer) so server and first
+  // client render agree.
+  useEffect(() => {
+    const current = document.documentElement.getAttribute('data-theme');
+    if (current === 'dark' || current === 'light') setTheme(current);
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('hermes-theme', next);
+      } catch {
+        /* private mode / quota — the choice just won't persist */
+      }
+      return next;
+    });
+  };
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
@@ -427,7 +453,7 @@ export default function HermesChat() {
   });
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#f8f7f4] font-sans text-[#3a3a3a]">
+    <div className="flex h-dvh overflow-hidden bg-app font-sans text-ink">
       {/* Backdrop — only on mobile while the drawer is open */}
       {sidebarOpen && (
         <div
@@ -439,20 +465,20 @@ export default function HermesChat() {
 
       {/* Sidebar — off-canvas drawer on mobile, static column on md+ */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[84vw] max-w-xs flex-col border-r border-[#e5e3dc] bg-white transition-transform duration-300 ease-out md:static md:z-auto md:w-72 md:max-w-none md:translate-x-0 md:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[84vw] max-w-xs flex-col border-r border-line bg-surface transition-transform duration-300 ease-out md:static md:z-auto md:w-72 md:max-w-none md:translate-x-0 md:shadow-none ${
           sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}
       >
-        <div className="p-4 border-b border-[#e5e3dc]">
+        <div className="p-4 border-b border-line">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="font-display font-semibold text-lg tracking-tight">Hermes</div>
-              <div className="text-xs text-[#6b6b6b]">Martuni UI</div>
+              <div className="text-xs text-ink-muted">Martuni UI</div>
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={createNewChat}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#128a63] text-white text-sm font-medium hover:bg-[#0f7554] transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-brand text-white text-sm font-medium hover:bg-brand-strong transition-colors"
               >
                 <Plus size={16} /> Neu
               </button>
@@ -460,7 +486,7 @@ export default function HermesChat() {
               <button
                 onClick={() => setSidebarOpen(false)}
                 aria-label="Seitenleiste schließen"
-                className="md:hidden p-2 rounded-xl text-[#6b6b6b] hover:bg-[#f1f0eb] transition-colors"
+                className="md:hidden p-2 rounded-xl text-ink-muted hover:bg-surface-hover transition-colors"
               >
                 <X size={18} />
               </button>
@@ -471,7 +497,7 @@ export default function HermesChat() {
         {/* Chat List */}
         <div className="flex-1 overflow-auto p-2 space-y-1">
           {sortedChats.length === 0 && (
-            <div className="px-4 py-8 text-center text-sm text-[#6b6b6b]">
+            <div className="px-4 py-8 text-center text-sm text-ink-muted">
               Keine Chats vorhanden.<br />Erstelle deinen ersten Chat.
             </div>
           )}
@@ -482,11 +508,11 @@ export default function HermesChat() {
               onClick={() => selectChat(chat.id)}
               className={`group flex items-center gap-3 px-3 py-3 rounded-2xl cursor-pointer transition-all ${
                 activeChatId === chat.id
-                  ? 'bg-[#128a63] text-white'
-                  : 'hover:bg-[#f1f0eb]'
+                  ? 'bg-brand text-white'
+                  : 'hover:bg-surface-hover'
               }`}
             >
-              <MessageCircle size={18} className={`shrink-0 ${activeChatId === chat.id ? 'text-white' : 'text-[#128a63]'}`} />
+              <MessageCircle size={18} className={`shrink-0 ${activeChatId === chat.id ? 'text-white' : 'text-brand'}`} />
 
               {editingChatId === chat.id ? (
                 <div className="flex-1 min-w-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -499,18 +525,18 @@ export default function HermesChat() {
                       if (e.key === 'Escape') cancelRename();
                     }}
                     onBlur={commitRename}
-                    className="flex-1 min-w-0 bg-white text-[#3a3a3a] border border-[#128a63] rounded-lg px-2 py-1 text-base md:text-sm focus:outline-none"
+                    className="flex-1 min-w-0 bg-surface text-ink border border-brand rounded-lg px-2 py-1 text-base md:text-sm focus:outline-none"
                   />
                   <button
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); commitRename(); }}
-                    className="p-1.5 rounded-lg hover:bg-black/10 text-[#128a63]"
+                    className="p-1.5 rounded-lg hover:bg-black/10 text-brand"
                     title="Speichern"
                   >
                     <Check size={14} />
                   </button>
                   <button
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); cancelRename(); }}
-                    className="p-1.5 rounded-lg hover:bg-black/10 text-[#6b6b6b]"
+                    className="p-1.5 rounded-lg hover:bg-black/10 text-ink-muted"
                     title="Abbrechen"
                   >
                     <X size={14} />
@@ -558,8 +584,19 @@ export default function HermesChat() {
           ))}
         </div>
 
-        <div className="p-3 border-t border-[#e5e3dc] text-[10px] text-[#8a8a8a] text-center">
-          Chats werden geräteübergreifend gespeichert
+        <div className="border-t border-line">
+          <button
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? 'Zum hellen Modus wechseln' : 'Zum dunklen Modus wechseln'}
+            title={theme === 'dark' ? 'Heller Modus' : 'Dunkler Modus'}
+            className="flex w-full items-center gap-3 px-4 py-3 text-sm text-ink-muted hover:bg-surface-hover transition-colors"
+          >
+            {theme === 'dark' ? <Sun size={18} className="text-brand" /> : <Moon size={18} className="text-brand" />}
+            <span>{theme === 'dark' ? 'Heller Modus' : 'Dunkler Modus'}</span>
+          </button>
+          <div className="px-3 pb-3 text-[10px] text-ink-faint text-center">
+            Chats werden geräteübergreifend gespeichert
+          </div>
         </div>
       </aside>
 
@@ -573,8 +610,8 @@ export default function HermesChat() {
       >
         {/* Drag & drop overlay — visual only; the drop is handled on the column */}
         {isDragging && (
-          <div className="absolute inset-0 z-20 m-2 rounded-2xl border-2 border-dashed border-[#128a63] bg-[#128a63]/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-            <div className="flex flex-col items-center gap-2 text-[#128a63]">
+          <div className="absolute inset-0 z-20 m-2 rounded-2xl border-2 border-dashed border-brand bg-brand/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
+            <div className="flex flex-col items-center gap-2 text-brand">
               <Upload size={28} />
               <div className="text-sm font-medium">Dateien hier ablegen</div>
             </div>
@@ -582,11 +619,11 @@ export default function HermesChat() {
         )}
 
         {/* Top bar — always present so the menu button is reachable */}
-        <div className="h-14 shrink-0 border-b border-[#e5e3dc] px-3 md:px-6 flex items-center gap-3 bg-white">
+        <div className="h-14 shrink-0 border-b border-line px-3 md:px-6 flex items-center gap-3 bg-surface">
           <button
             onClick={() => setSidebarOpen(true)}
             aria-label="Seitenleiste öffnen"
-            className="md:hidden p-2 -ml-1 rounded-xl text-[#3a3a3a] hover:bg-[#f1f0eb] transition-colors"
+            className="md:hidden p-2 -ml-1 rounded-xl text-ink hover:bg-surface-hover transition-colors"
           >
             <Menu size={22} />
           </button>
@@ -594,7 +631,7 @@ export default function HermesChat() {
             {activeChat ? activeChat.title : 'Hermes'}
           </div>
           {activeChat && (
-            <div className="ml-auto shrink-0 text-xs px-3 py-1 rounded-full bg-[#f1f0eb] text-[#6b6b6b]">
+            <div className="ml-auto shrink-0 text-xs px-3 py-1 rounded-full bg-surface-hover text-ink-muted">
               {activeChat.messages.length} Nachrichten
             </div>
           )}
@@ -603,9 +640,9 @@ export default function HermesChat() {
         {activeChat ? (
           <>
             {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-auto p-4 md:p-6 space-y-2.5 md:space-y-3 bg-[#f8f7f4]">
+            <div ref={scrollRef} className="flex-1 overflow-auto p-4 md:p-6 space-y-2.5 md:space-y-3 bg-app">
               {activeChat.messages.length === 0 && (
-                <div className="h-full flex items-center justify-center text-center text-[#6b6b6b] text-sm px-4">
+                <div className="h-full flex items-center justify-center text-center text-ink-muted text-sm px-4">
                   Starte die Unterhaltung mit Hermes
                 </div>
               )}
@@ -618,8 +655,8 @@ export default function HermesChat() {
                   <div
                     className={`max-w-[85%] md:max-w-[70%] px-3.5 md:px-4 py-2 md:py-2.5 rounded-3xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                       msg.role === 'user'
-                        ? 'bg-[#128a63] text-white rounded-br-md'
-                        : 'bg-white border border-[#e5e3dc] rounded-bl-md'
+                        ? 'bg-brand text-white rounded-br-md'
+                        : 'bg-surface border border-line rounded-bl-md'
                     }`}
                   >
                     {msg.attachments && msg.attachments.length > 0 && (
@@ -638,7 +675,7 @@ export default function HermesChat() {
                             <span
                               key={a.id}
                               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs ${
-                                msg.role === 'user' ? 'bg-white/15' : 'bg-[#f1f0eb] text-[#3a3a3a]'
+                                msg.role === 'user' ? 'bg-white/15' : 'bg-surface-hover text-ink'
                               }`}
                               title={a.name}
                             >
@@ -657,7 +694,7 @@ export default function HermesChat() {
               {isLoading && (
                 <div className="flex justify-start">
                   <div
-                    className="flex items-center gap-2.5 px-1.5 py-1 text-[#6b6b6b]"
+                    className="flex items-center gap-2.5 px-1.5 py-1 text-ink-muted"
                     role="status"
                     aria-label="Hermes denkt nach"
                   >
@@ -669,7 +706,7 @@ export default function HermesChat() {
             </div>
 
             {/* Input */}
-            <div className="shrink-0 border-t border-[#e5e3dc] bg-white p-3 md:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <div className="shrink-0 border-t border-line bg-surface p-3 md:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <div className="max-w-4xl mx-auto">
                 {/* Staged attachments (pre-send preview) */}
                 {pending.length > 0 && (
@@ -681,14 +718,14 @@ export default function HermesChat() {
                           <img
                             src={a.dataUrl}
                             alt={a.name}
-                            className="h-16 w-16 rounded-lg border border-[#e5e3dc] object-cover"
+                            className="h-16 w-16 rounded-lg border border-line object-cover"
                           />
                         ) : (
                           <span
-                            className="inline-flex items-center gap-1.5 h-16 px-3 rounded-lg border border-[#e5e3dc] bg-[#f8f7f4] text-xs text-[#3a3a3a]"
+                            className="inline-flex items-center gap-1.5 h-16 px-3 rounded-lg border border-line bg-app text-xs text-ink"
                             title={a.name}
                           >
-                            <FileText size={14} className="shrink-0 text-[#128a63]" />
+                            <FileText size={14} className="shrink-0 text-brand" />
                             <span className="truncate max-w-[8rem]">{a.name}</span>
                           </span>
                         )}
@@ -720,7 +757,7 @@ export default function HermesChat() {
                     onClick={() => fileInputRef.current?.click()}
                     aria-label="Datei anhängen"
                     title="Bild oder Datei anhängen"
-                    className="shrink-0 w-11 h-11 rounded-2xl border border-[#e5e3dc] bg-[#f8f7f4] text-[#128a63] flex items-center justify-center hover:bg-[#f1f0eb] transition-colors"
+                    className="shrink-0 w-11 h-11 rounded-2xl border border-line bg-app text-brand flex items-center justify-center hover:bg-surface-hover transition-colors"
                   >
                     <Plus size={20} />
                   </button>
@@ -732,12 +769,12 @@ export default function HermesChat() {
                     onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                     onPaste={handlePaste}
                     placeholder="Nachricht an Hermes…"
-                    className="flex-1 min-w-0 bg-[#f8f7f4] border border-[#e5e3dc] rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-[#128a63]"
+                    className="flex-1 min-w-0 bg-app border border-line rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-brand"
                   />
                   <button
                     onClick={sendMessage}
                     disabled={(!input.trim() && pending.length === 0) || isLoading}
-                    className="shrink-0 w-11 h-11 md:w-auto md:px-6 rounded-2xl bg-[#128a63] text-white disabled:opacity-50 flex items-center justify-center hover:bg-[#0f7554] transition-colors"
+                    className="shrink-0 w-11 h-11 md:w-auto md:px-6 rounded-2xl bg-brand text-white disabled:opacity-50 flex items-center justify-center hover:bg-brand-strong transition-colors"
                   >
                     <Send size={18} />
                   </button>
@@ -746,13 +783,13 @@ export default function HermesChat() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-[#6b6b6b] p-6">
+          <div className="flex-1 flex items-center justify-center text-ink-muted p-6">
             <div className="text-center">
               <MessageCircle size={48} className="mx-auto mb-4 opacity-40" />
               <p className="mb-4">Erstelle einen neuen Chat um zu beginnen</p>
               <button
                 onClick={createNewChat}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#128a63] text-white text-sm font-medium hover:bg-[#0f7554] transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand text-white text-sm font-medium hover:bg-brand-strong transition-colors"
               >
                 <Plus size={16} /> Neuer Chat
               </button>

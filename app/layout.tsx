@@ -45,8 +45,22 @@ export default function RootLayout({
   return (
     <html
       lang="de"
+      data-theme="light"
+      suppressHydrationWarning
       className={`${schibsted.variable} ${bricolage.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* Apply the saved theme before first paint to avoid a light→dark flash.
+            Reads localStorage (key `hermes-theme`), else the OS preference, and
+            sets data-theme on <html>; globals.css flips the palette off it.
+            suppressHydrationWarning on <html> lets this DOM write win over the
+            server-rendered default. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("hermes-theme");var d=t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.setAttribute("data-theme",d?"dark":"light")}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

@@ -1,33 +1,80 @@
 @import "tailwindcss";
 
+/*
+ * Depot Design System — UI surface palette as CSS variables.
+ *
+ * The LIGHT values below are the exact hex colours the components shipped with,
+ * so light mode is pixel-identical to before. The `[data-theme="dark"]` block
+ * flips the same variables for dark mode. Components reference them through the
+ * Tailwind colour utilities registered in `@theme inline` (bg-app, bg-surface,
+ * text-ink, border-line, bg-brand, …), so a single class works in both themes
+ * with no per-element `dark:` variant.
+ *
+ * The theme is chosen before first paint by an inline script in app/layout.tsx
+ * that sets `data-theme` on <html> from localStorage (key `hermes-theme`),
+ * falling back to the OS `prefers-color-scheme`. The sidebar toggle in
+ * app/page.tsx updates the same attribute + storage key.
+ */
 :root {
-  /* Depot Design System Tokens (angepasst) */
-  --background: oklch(0.977 0.008 84);
-  --foreground: oklch(0.245 0.012 56);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.245 0.012 56);
+  --app: #f8f7f4; /* page background */
+  --surface: #ffffff; /* sidebar, top bar, cards, assistant bubble, inputs */
+  --ink: #3a3a3a; /* primary text */
+  --ink-muted: #6b6b6b; /* secondary text */
+  --ink-faint: #8a8a8a; /* tertiary text */
+  --line: #e5e3dc; /* borders / hairlines */
+  --surface-hover: #f1f0eb; /* hover fill on neutral surfaces */
+  --brand: #128a63; /* Depot green — buttons, accents, active chat */
+  --brand-strong: #0f7554; /* brand hover */
+
+  /* DS green for the "thinking" spinner (and the unused .chat-input rule). */
   --primary: oklch(0.596 0.145 163);
-  --primary-foreground: oklch(0.985 0.001 106.423);
-  --secondary: oklch(0.95 0.026 163);
-  --secondary-foreground: oklch(0.378 0.077 168.94);
-  --muted: oklch(0.951 0.012 84);
-  --muted-foreground: oklch(0.52 0.018 60);
-  --border: oklch(0.912 0.014 84);
-  --ring: oklch(0.596 0.145 163);
-  --shadow-soft: 0 1px 2px oklch(0.25 0.04 70 / 0.05), 0 16px 40px -20px oklch(0.3 0.08 70 / 0.16);
 
   --font-sans: var(--font-schibsted), -apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-bricolage), var(--font-schibsted), ui-sans-serif, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
+[data-theme="dark"] {
+  --app: #0e1311; /* warm-neutral charcoal with a faint green cast */
+  --surface: #161c1a;
+  --ink: #e7e6e2;
+  --ink-muted: #9aa19c;
+  --ink-faint: #6f756f;
+  --line: #29302d;
+  --surface-hover: #1f2623;
+  --brand: #1aa978; /* brightened so it carries on a dark ground */
+  --brand-strong: #23b485; /* brand hover — brighter, the usual dark-mode cue */
+  --primary: oklch(0.72 0.14 163); /* spinner green, lifted for dark */
+}
+
+/* Register the surface palette as Tailwind colours. `inline` emits the var()
+   reference into each utility, so flipping the variables above re-themes every
+   utility at runtime. */
+@theme inline {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-surface-hover: var(--surface-hover);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--app);
+  color: var(--ink);
   font-family: var(--font-sans);
   /* Avoid the iOS rubber-band/extra-scroll while the chat manages its own
      scroll regions inside a 100dvh shell. */
   overscroll-behavior: none;
+}
+
+/* Smooth the theme switch without animating layout-affecting properties. */
+body,
+[data-theme] {
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .font-display {
