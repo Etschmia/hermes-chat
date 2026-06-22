@@ -231,6 +231,11 @@ export default function HermesChat() {
     setTheme(prev => {
       const next = prev === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
+      // Keep the browser-chrome colour in sync (see layout.tsx). The meta is
+      // created by the inline script on load, so it's present here. Colours
+      // mirror --brand (light) and the dark --surface in globals.css.
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', next === 'dark' ? '#161c1a' : '#128a63');
       try {
         localStorage.setItem('hermes-theme', next);
       } catch {
