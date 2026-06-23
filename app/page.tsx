@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon, Copy } from 'lucide-react';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
 
 interface Chat {
@@ -28,43 +30,85 @@ function imageSrc(p: string, download = false): string {
   return `/api/genimage?path=${encodeURIComponent(clean)}${download ? '&download=1' : ''}`;
 }
 
-// Render message text, turning Markdown images `![alt](src)` into inline images
-// with a "download original" link. Everything else stays plain text (the bubble
-// is whitespace-pre-wrap). This is what makes generated images show up instead
-// of a bare path.
+// Markdown image renderer: http/data used as-is; a local server path (what the
+// agent returns for a generated image) is routed through /api/genimage, with a
+// "download original" link. Deliberately <span>/<a> (inline elements) so nesting
+// inside the surrounding <p> stays valid HTML.
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const url = (src || '').trim().split(/\s+/)[0]; // drop an optional "title"
+  if (!url) return null;
+  const view = imageSrc(url, false);
+  const dl = imageSrc(url, true);
+  const fname = (url.split('/').pop() || 'bild').replace(/[?#].*$/, '');
+  return (
+    <span className="block my-1.5">
+      <a href={view} target="_blank" rel="noopener noreferrer" className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element -- dynamic generated image, next/image is inappropriate */}
+        <img src={view} alt={alt || 'Bild'} className="max-h-80 max-w-full rounded-lg border border-line" />
+      </a>
+      <a
+        href={dl}
+        download={fname}
+        className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand transition-colors"
+        title="In Originalgröße herunterladen"
+      >
+        <Download size={14} /> Original
+      </a>
+    </span>
+  );
+}
+
+// Markdown elements tuned for the chat bubble (text-sm; colour inherits from the
+// bubble so it stays readable on both the user and assistant background).
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 last:mb-0 list-disc space-y-0.5 pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 last:mb-0 list-decimal space-y-0.5 pl-5">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:opacity-80">
+      {children}
+    </a>
+  ),
+  h1: ({ children }) => <h1 className="mt-2 mb-1 text-base font-semibold first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mt-2 mb-1 text-base font-semibold first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold first:mt-0">{children}</h3>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-2 border-l-2 border-current/30 pl-3 italic opacity-90">{children}</blockquote>
+  ),
+  hr: () => <hr className="my-2 border-current/20" />,
+  code: ({ children }) => <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[0.85em]">{children}</code>,
+  pre: ({ children }) => (
+    <pre className="my-2 overflow-x-auto rounded-lg bg-black/10 p-3 text-xs leading-relaxed [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto">
+      <table className="w-full border-collapse text-xs">{children}</table>
+    </div>
+  ),
+  th: ({ children }) => <th className="border border-current/20 px-2 py-1 text-left font-semibold">{children}</th>,
+  td: ({ children }) => <td className="border border-current/20 px-2 py-1">{children}</td>,
+  img: (props) => (
+    <MarkdownImage
+      src={typeof props.src === 'string' ? props.src : undefined}
+      alt={typeof props.alt === 'string' ? props.alt : undefined}
+    />
+  ),
+};
+
+// Render message text as Markdown (GFM). Generated images with a local path are
+// resolved via MarkdownImage → /api/genimage. react-markdown renders NO raw HTML
+// (no rehype-raw) → no XSS from model output.
 function MessageBody({ content }: { content: string }) {
-  const nodes: React.ReactNode[] = [];
-  const re = /!\[([^\]]*)\]\(([^)]+)\)/g;
-  let last = 0;
-  let key = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    if (m.index > last) nodes.push(<span key={key++}>{content.slice(last, m.index)}</span>);
-    const alt = m[1] || 'Bild';
-    const url = m[2].trim().split(/\s+/)[0]; // drop an optional "title"
-    const view = imageSrc(url, false);
-    const dl = imageSrc(url, true);
-    const fname = (url.split('/').pop() || 'bild').replace(/[?#].*$/, '');
-    nodes.push(
-      <span key={key++} className="block my-1.5">
-        <a href={view} target="_blank" rel="noopener noreferrer" className="block">
-          {/* eslint-disable-next-line @next/next/no-img-element -- dynamic generated image, next/image is inappropriate */}
-          <img src={view} alt={alt} className="max-h-80 max-w-full rounded-lg border border-black/10" />
-        </a>
-        <a
-          href={dl}
-          download={fname}
-          className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand transition-colors"
-          title="In Originalgröße herunterladen"
-        >
-          <Download size={14} /> Original
-        </a>
-      </span>
-    );
-    last = re.lastIndex;
-  }
-  if (last < content.length) nodes.push(<span key={key++}>{content.slice(last)}</span>);
-  return <>{nodes}</>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 export default function HermesChat() {
@@ -87,6 +131,8 @@ export default function HermesChat() {
   // True once the initial server load has settled — guards the save effect so
   // an empty first render can never overwrite the server store.
   const [loaded, setLoaded] = useState(false);
+  // Which message was just copied? (brief "Kopiert" feedback on its button)
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   // Theme toggle. The inline script in layout.tsx has already set data-theme on
   // <html> before paint (from localStorage / OS pref); we start from a fixed
   // 'light' so the first client render matches the server HTML (no hydration
@@ -332,6 +378,30 @@ export default function HermesChat() {
   };
 
   const removePending = (id: string) => setPending(p => p.filter(a => a.id !== id));
+
+  // Copy a message's RAW Markdown to the clipboard, with a brief "Kopiert"
+  // feedback. Falls back to a temporary <textarea> where the Clipboard API is
+  // unavailable (e.g. an insecure origin).
+  const copyRawMarkdown = async (id: string, text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(prev => (prev === id ? null : prev)), 1500);
+    } catch {
+      /* clipboard unavailable — silently ignore */
+    }
+  };
 
   // Only react to OS file drags (not text/element drags inside the page).
   const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
@@ -658,7 +728,7 @@ export default function HermesChat() {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] md:max-w-[70%] px-3.5 md:px-4 py-2 md:py-2.5 rounded-3xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                    className={`group max-w-[85%] md:max-w-[70%] px-3.5 md:px-4 py-2 md:py-2.5 rounded-3xl text-sm leading-relaxed break-words ${
                       msg.role === 'user'
                         ? 'bg-brand text-white rounded-br-md'
                         : 'bg-surface border border-line rounded-bl-md'
@@ -692,6 +762,22 @@ export default function HermesChat() {
                       </div>
                     )}
                     {msg.content && <div><MessageBody content={msg.content} /></div>}
+                    {/* Inline copy of the RAW Markdown (mainly for assistant answers). */}
+                    {msg.content && (
+                      <div className={`mt-1 flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                        <button
+                          onClick={() => copyRawMarkdown(msg.id, msg.content)}
+                          aria-label="Rohes Markdown kopieren"
+                          title="Rohes Markdown kopieren"
+                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] opacity-100 transition-opacity hover:bg-black/10 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+                            msg.role === 'user' ? 'text-white/80' : 'text-ink-muted'
+                          }`}
+                        >
+                          {copiedId === msg.id ? <Check size={13} /> : <Copy size={13} />}
+                          <span>{copiedId === msg.id ? 'Kopiert' : 'Kopieren'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
