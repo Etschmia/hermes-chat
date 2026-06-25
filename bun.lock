@@ -5,7 +5,7 @@
     "": {
       "name": "hermes-chat",
       "dependencies": {
-        "@hermes/gateway-client": "file:../hermes-gateway-client/hermes-gateway-client-0.1.0.tgz",
+        "@hermes/gateway-client": "github:Etschmia/hermes-gateway-client#v0.1.1",
         "lucide-react": "^1.21.0",
         "next": "16.2.9",
         "react": "19.2.4",
@@ -85,7 +85,7 @@
 
     "@eslint/plugin-kit": ["@eslint/plugin-kit@0.4.1", "", { "dependencies": { "@eslint/core": "^0.17.0", "levn": "^0.4.1" } }, "sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA=="],
 
-    "@hermes/gateway-client": ["@hermes/gateway-client@../hermes-gateway-client/hermes-gateway-client-0.1.0.tgz", {}, "sha512-1tcqz7riaEpaRF3O8h6ZQtDGOfCCO/q9w0auLVFJWwN7fLUiHe5jlhPPzyZ9q/D0S7azWBORvv92WGkmtvsQXw=="],
+    "@hermes/gateway-client": ["@hermes/gateway-client@github:Etschmia/hermes-gateway-client#0b9aa4b", {}, "Etschmia-hermes-gateway-client-0b9aa4b", "sha512-U4nsUKgAFrZ4fx0dsa7njUFu7eQPOs7EkQYnvg2PvyW2HafE/r31vyJv5P/rI5rVhW18x3SeW5uV1vlHViFWYA=="],
 
     "@humanfs/core": ["@humanfs/core@0.19.2", "", { "dependencies": { "@humanfs/types": "^0.15.0" } }, "sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA=="],
 
