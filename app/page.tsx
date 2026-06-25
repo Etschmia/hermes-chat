@@ -5,6 +5,7 @@ import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu,
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
+import { postChat, assistantText, ChatError } from '@hermes/gateway-client/browser';
 
 interface Chat {
   id: string;
@@ -472,22 +473,11 @@ export default function HermesChat() {
         .find(c => c.id === activeChatId)!
         .messages.map(m => ({ role: m.role, content: toApiContent(m.content, m.attachments) }));
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages: apiMessages }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        const reason = data?.detail || data?.error || `HTTP ${response.status}`;
-        throw new Error(reason);
-      }
-
-      const assistantContent = data.choices?.[0]?.message?.content || 'Keine Antwort erhalten.';
+      // postChat owns the timeout, error classification and a narrow,
+      // side-effect-safe retry — so a flaky mobile connection no longer
+      // collapses into a bare "Failed to fetch" (see app/lib/chatClient.ts).
+      const data = await postChat(apiMessages);
+      const assistantContent = assistantText(data);
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(36),
@@ -503,11 +493,16 @@ export default function HermesChat() {
       });
       setChats(finalChats);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unbekannter Fehler';
+      // ChatError already carries a complete, actionable German sentence; for
+      // anything unexpected keep the old "Verbindung zu Hermes" framing.
+      const content =
+        error instanceof ChatError
+          ? `⚠️ ${error.message}`
+          : `⚠️ Fehler bei der Verbindung zu Hermes: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`;
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(36),
         role: 'assistant',
-        content: `⚠️ Fehler bei der Verbindung zu Hermes: ${detail}`,
+        content,
       };
       const finalChats = updatedChats.map(chat => {
         if (chat.id === activeChatId) {

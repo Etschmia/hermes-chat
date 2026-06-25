@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@hermes/gateway-client": "file:../hermes-gateway-client/hermes-gateway-client-0.1.0.tgz",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",
     "react": "19.2.4",
