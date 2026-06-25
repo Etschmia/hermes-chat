@@ -21,6 +21,25 @@ The route is an OpenAI-compatible proxy. **Do not call an external provider
 pointed at `https://api.x.ai/v1` with no auth, which is the bug that caused
 "Fehler bei der Verbindung zu Hermes".
 
+## Shared gateway client (`@hermes/gateway-client`)
+
+The client fetch (`app/page.tsx`) and the proxy core (`app/api/chat/route.ts`)
+come from the shared package **`@hermes/gateway-client`** — a *public* GitHub
+repo pinned by tag (`github:Etschmia/hermes-gateway-client#vX.Y.Z`), also used by
+depot3. It provides:
+
+- `/browser` — `postChat` (client-side timeout, typed `ChatError`,
+  side-effect-safe retry) and `assistantText`.
+- `/server` — `forwardToGateway` (Bearer auth, abort/timeout, 502/504 mapping);
+  the route is a thin wrapper — auth / system-prompt assembly stays app-local.
+- `/attachments` — `fileToAttachment`, `toApiContent`, `Attachment` types.
+
+To change shared transport logic, edit the **package**, not this app. The
+release & upgrade workflow lives in that repo's README
+(`/home/librechat/hermes-gateway-client`). Gotcha: bun can't install git deps and
+throws `DependencyLoop` on in-place upgrades — always `bun remove
+@hermes/gateway-client` then `bun add …#vX.Y.Z`.
+
 ## Chat persistence (cross-device)
 
 ```

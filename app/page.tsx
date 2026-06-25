@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon, Copy } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { fileToAttachment, toApiContent, type Attachment } from './lib/attachments';
+import { fileToAttachment, toApiContent, type Attachment } from '@hermes/gateway-client/attachments';
 import { postChat, assistantText, ChatError } from '@hermes/gateway-client/browser';
 
 interface Chat {
