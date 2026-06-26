@@ -5,7 +5,7 @@ import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu,
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fileToAttachment, toApiContent, type Attachment } from '@hermes/gateway-client/attachments';
-import { postChat, assistantText, ChatError } from '@hermes/gateway-client/browser';
+import { streamChat, ChatError } from '@hermes/gateway-client/browser';
 
 interface Chat {
   id: string;
@@ -117,6 +117,9 @@ export default function HermesChat() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Live tool-progress line shown in the assistant bubble until the first token
+  // (e.g. "🔎 depot3"), fed by the gateway's hermes.tool.progress events.
+  const [streamProgress, setStreamProgress] = useState('');
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   // Attachments staged in the composer, plus a transient note for rejected files.
@@ -463,6 +466,26 @@ export default function HermesChat() {
     setInput('');
     setPending([]);
     setIsLoading(true);
+    setStreamProgress('');
+
+    // Insert an empty assistant bubble up front; it fills in as tokens stream.
+    const assistantId = (Date.now() + 1).toString(36);
+    setChats(prev =>
+      prev.map(chat =>
+        chat.id === activeChatId
+          ? { ...chat, messages: [...chat.messages, { id: assistantId, role: 'assistant', content: '' }] }
+          : chat,
+      ),
+    );
+    // Write the running assistant text into its bubble.
+    const paint = (text: string) =>
+      setChats(prev =>
+        prev.map(chat =>
+          chat.id === activeChatId
+            ? { ...chat, messages: chat.messages.map(m => (m.id === assistantId ? { ...m, content: text } : m)) }
+            : chat,
+        ),
+      );
 
     try {
       // Call our internal API route (server-side, no CORS issues). The model is
@@ -473,25 +496,23 @@ export default function HermesChat() {
         .find(c => c.id === activeChatId)!
         .messages.map(m => ({ role: m.role, content: toApiContent(m.content, m.attachments) }));
 
-      // postChat owns the timeout, error classification and a narrow,
-      // side-effect-safe retry — so a flaky mobile connection no longer
-      // collapses into a bare "Failed to fetch" (see app/lib/chatClient.ts).
-      const data = await postChat(apiMessages);
-      const assistantContent = assistantText(data);
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(36),
-        role: 'assistant',
-        content: assistantContent,
-      };
-
-      const finalChats = updatedChats.map(chat => {
-        if (chat.id === activeChatId) {
-          return { ...chat, messages: [...chat.messages, assistantMessage] };
-        }
-        return chat;
+      // streamChat consumes the gateway's SSE: tokens arrive via onDelta and the
+      // per-30s keepalive keeps the connection alive, so a deep, multi-minute
+      // turn no longer collapses into a bare "Failed to fetch" on an idle
+      // timeout. The bubble grows live; tool activity shows as a status line
+      // until the first token. (Throttle repaints to ~16/s to stay smooth.)
+      let lastPaint = 0;
+      const finalText = await streamChat(apiMessages, {
+        onDelta: (_piece, running) => {
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          if (now - lastPaint > 60) {
+            lastPaint = now;
+            paint(running);
+          }
+        },
+        onProgress: p => setStreamProgress(`${p.emoji ?? '⚙️'} ${p.label ?? p.tool ?? ''}`.trim()),
       });
-      setChats(finalChats);
+      paint(finalText); // final flush guarantees the complete answer is shown
     } catch (error) {
       // ChatError already carries a complete, actionable German sentence; for
       // anything unexpected keep the old "Verbindung zu Hermes" framing.
@@ -499,19 +520,9 @@ export default function HermesChat() {
         error instanceof ChatError
           ? `⚠️ ${error.message}`
           : `⚠️ Fehler bei der Verbindung zu Hermes: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`;
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(36),
-        role: 'assistant',
-        content,
-      };
-      const finalChats = updatedChats.map(chat => {
-        if (chat.id === activeChatId) {
-          return { ...chat, messages: [...chat.messages, errorMessage] };
-        }
-        return chat;
-      });
-      setChats(finalChats);
+      paint(content);
     } finally {
+      setStreamProgress('');
       setIsLoading(false);
     }
   };
@@ -756,7 +767,16 @@ export default function HermesChat() {
                         )}
                       </div>
                     )}
-                    {msg.content && <div><MessageBody content={msg.content} /></div>}
+                    {msg.content ? (
+                      <div><MessageBody content={msg.content} /></div>
+                    ) : (
+                      msg.role === 'assistant' && isLoading && (
+                        <div className="flex items-center gap-2.5 py-0.5 text-ink-muted" role="status" aria-label="Hermes arbeitet">
+                          <span className="hermes-spinner" aria-hidden />
+                          <span className="text-xs">{streamProgress || 'Hermes denkt nach…'}</span>
+                        </div>
+                      )
+                    )}
                     {/* Inline copy of the RAW Markdown (mainly for assistant answers). */}
                     {msg.content && (
                       <div className={`mt-1 flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
@@ -777,18 +797,6 @@ export default function HermesChat() {
                 </div>
               ))}
 
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div
-                    className="flex items-center gap-2.5 px-1.5 py-1 text-ink-muted"
-                    role="status"
-                    aria-label="Hermes denkt nach"
-                  >
-                    <span className="hermes-spinner" aria-hidden />
-                    <span className="text-xs">Hermes denkt nach…</span>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Input */}
