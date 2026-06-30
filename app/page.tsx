@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon, Copy } from 'lucide-react';
+import { Plus, Pin, PinOff, Trash2, MessageCircle, Send, Pencil, Check, X, Menu, FileText, Upload, Download, Sun, Moon, Copy, Terminal, ChevronRight, ChevronLeft } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fileToAttachment, toApiContent, type Attachment } from '@hermes/gateway-client/attachments';
@@ -142,6 +142,11 @@ export default function HermesChat() {
   // 'light' so the first client render matches the server HTML (no hydration
   // mismatch on the toggle icon), then adopt the real value after mount.
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  // Command menu
+  const [cmdMenuOpen, setCmdMenuOpen] = useState(false);
+  const [cmdSubmenu, setCmdSubmenu] = useState<'model' | 'reasoning' | null>(null);
+  const [modelInput, setModelInput] = useState('');
+  const [cmdFeedback, setCmdFeedback] = useState<{ type: 'info' | 'warn' | 'error' | 'loading'; text: string } | null>(null);
 
   const loadedRef = useRef(false);
   const chatsRef = useRef<Chat[]>([]);
@@ -149,6 +154,7 @@ export default function HermesChat() {
   const pendingRef = useRef(false); // unsynced local changes?
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const cmdMenuRef = useRef<HTMLDivElement>(null);
 
   const pickActive = (list: Chat[]) =>
     setActiveChatId(prev => (list.some(c => c.id === prev) ? prev : list[0]?.id ?? null));
@@ -297,6 +303,18 @@ export default function HermesChat() {
 
   const activeChat = chats.find(c => c.id === activeChatId);
 
+  // Close the command menu when clicking outside of it.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (cmdMenuRef.current && !cmdMenuRef.current.contains(e.target as Node)) {
+        setCmdMenuOpen(false);
+        setCmdSubmenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   // Keep the conversation pinned to the latest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -438,11 +456,87 @@ export default function HermesChat() {
     addFiles(e.dataTransfer.files);
   };
 
-  const sendMessage = async () => {
-    const text = input.trim();
-    if ((!text && pending.length === 0) || !activeChatId || isLoading) return;
+  // ---- Command menu helpers ----
 
-    const atts = pending;
+  const closeCmdMenu = () => { setCmdMenuOpen(false); setCmdSubmenu(null); };
+
+  const showFeedback = (type: 'info' | 'warn' | 'error' | 'loading', text: string, autoDismissMs = 12_000) => {
+    setCmdFeedback({ type, text });
+    if (type !== 'loading') setTimeout(() => setCmdFeedback(f => f?.text === text ? null : f), autoDismissMs);
+  };
+
+  const handleStatus = async () => {
+    closeCmdMenu();
+    showFeedback('loading', 'Status wird geladen…');
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Fehler');
+      const h = data.health;
+      const c = data.capabilities;
+      const lines = [
+        `Gateway:   ${h?.status ?? '?'}  (${h?.gateway_state ?? '?'})`,
+        `Version:   ${h?.version ?? '?'}`,
+        `Modell:    ${c?.model ?? '?'}`,
+        `PID:       ${h?.pid ?? '?'}`,
+        `Agents:    ${h?.active_agents ?? 0} aktiv`,
+      ].join('\n');
+      showFeedback('info', lines);
+    } catch (e) {
+      showFeedback('error', `Fehler: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleCompress = () => {
+    closeCmdMenu();
+    if (!activeChatId) return;
+    const chat = chats.find(c => c.id === activeChatId);
+    if (!chat) return;
+    const KEEP = 20;
+    if (chat.messages.length <= KEEP) { showFeedback('info', 'Kontext ist bereits kurz genug.'); return; }
+    const removed = chat.messages.length - KEEP;
+    setChats(prev => prev.map(c =>
+      c.id === activeChatId ? { ...c, messages: c.messages.slice(-KEEP) } : c
+    ));
+    showFeedback('info', `Kontext gekürzt — ${removed} ältere Nachrichten entfernt.`);
+  };
+
+  const handleModelConfirm = () => {
+    const m = modelInput.trim();
+    if (!m) return;
+    closeCmdMenu();
+    setModelInput('');
+    showFeedback('warn', `Modell „${m}" vorgemerkt.\nDieser Wechsel greift erst ab dem nächsten Chat-Start\n(Gateway-Config muss dazu angepasst werden).`, 20_000);
+  };
+
+  const handleReasoningSelect = (level: string) => {
+    closeCmdMenu();
+    showFeedback('warn', `Reasoning auf „${level}" vorgemerkt.\nDieser Wechsel greift erst ab dem nächsten Chat-Start.`, 16_000);
+  };
+
+  const handleAdminAction = async (action: 'update' | 'restart') => {
+    closeCmdMenu();
+    const label = action === 'restart' ? 'Neustart' : 'Update';
+    showFeedback('loading', `${label} wird ausgeführt…`);
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      showFeedback(data.ok ? 'info' : 'error', data.output || (data.ok ? 'Fertig.' : 'Fehler.'));
+    } catch (e) {
+      showFeedback('error', `Netzwerkfehler: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  // ---- End command menu helpers ----
+
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText !== undefined ? overrideText : input).trim();
+    const atts = overrideText !== undefined ? [] : pending;
+    if ((!text && atts.length === 0) || !activeChatId || isLoading) return;
     const userMessage: Message = {
       id: Date.now().toString(36),
       role: 'user',
@@ -463,8 +557,7 @@ export default function HermesChat() {
       return chat;
     });
     setChats(updatedChats);
-    setInput('');
-    setPending([]);
+    if (overrideText === undefined) { setInput(''); setPending([]); }
     setIsLoading(true);
     setStreamProgress('');
 
@@ -837,7 +930,141 @@ export default function HermesChat() {
 
                 {attachError && <div className="mb-2 text-xs text-red-500">{attachError}</div>}
 
+                {/* Command feedback banner */}
+                {cmdFeedback && (
+                  <div className={`mb-2 rounded-2xl px-3.5 py-2.5 text-xs flex items-start gap-2 border ${
+                    cmdFeedback.type === 'error'   ? 'bg-red-500/10 border-red-500/25 text-red-600 dark:text-red-400' :
+                    cmdFeedback.type === 'warn'    ? 'bg-amber-400/10 border-amber-400/30 text-ink' :
+                    cmdFeedback.type === 'loading' ? 'bg-surface border-line text-ink-muted' :
+                                                     'bg-brand/10 border-brand/20 text-ink'
+                  }`}>
+                    {cmdFeedback.type === 'loading' && <span className="hermes-spinner mt-0.5 shrink-0" aria-hidden />}
+                    {cmdFeedback.type === 'warn'    && <span className="shrink-0 mt-0.5">⏰</span>}
+                    {cmdFeedback.type === 'error'   && <span className="shrink-0 mt-0.5">⚠️</span>}
+                    {cmdFeedback.type === 'info'    && <span className="shrink-0 mt-0.5">✓</span>}
+                    <span className="flex-1 whitespace-pre-wrap font-mono leading-relaxed">{cmdFeedback.text}</span>
+                    {cmdFeedback.type !== 'loading' && (
+                      <button onClick={() => setCmdFeedback(null)} className="shrink-0 opacity-50 hover:opacity-100 mt-0.5">
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex gap-2 md:gap-3 items-end">
+                  {/* Command menu button */}
+                  <div className="relative shrink-0" ref={cmdMenuRef}>
+                    <button
+                      onClick={() => { setCmdMenuOpen(o => !o); setCmdSubmenu(null); }}
+                      aria-label="Hermes-Befehle"
+                      title="Hermes-Befehle"
+                      className={`w-11 h-11 rounded-2xl border flex items-center justify-center transition-colors ${
+                        cmdMenuOpen
+                          ? 'border-brand bg-brand/10 text-brand'
+                          : 'border-line bg-app text-ink-muted hover:bg-surface-hover hover:text-brand'
+                      }`}
+                    >
+                      <Terminal size={18} />
+                    </button>
+
+                    {cmdMenuOpen && (
+                      <div className="absolute bottom-full mb-2 left-0 z-50 w-56 rounded-2xl border border-line bg-surface shadow-xl overflow-hidden">
+                        {cmdSubmenu === null ? (
+                          <div className="py-1.5">
+                            {[
+                              { key: 'status',   label: '/status',    desc: 'Info & Status',      fn: handleStatus },
+                              { key: 'compress', label: '/compress',  desc: 'Kontext kürzen',     fn: handleCompress },
+                            ].map(item => (
+                              <button key={item.key} onClick={item.fn}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-hover transition-colors"
+                              >
+                                <span className="font-mono text-xs text-brand w-20 shrink-0">{item.label}</span>
+                                <span className="text-xs text-ink-muted">{item.desc}</span>
+                              </button>
+                            ))}
+                            <button onClick={() => { closeCmdMenu(); sendMessage('/usage'); }}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-hover transition-colors"
+                            >
+                              <span className="font-mono text-xs text-brand w-20 shrink-0">/usage</span>
+                              <span className="text-xs text-ink-muted">Token-Nutzung</span>
+                            </button>
+                            <div className="my-1 border-t border-line" />
+                            {[
+                              { key: 'model',     label: '/model',     desc: 'Modell wählen' },
+                              { key: 'reasoning', label: '/reasoning', desc: 'Denktiefe' },
+                            ].map(item => (
+                              <button key={item.key}
+                                onClick={() => setCmdSubmenu(item.key as 'model' | 'reasoning')}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-hover transition-colors"
+                              >
+                                <span className="font-mono text-xs text-brand w-20 shrink-0">{item.label}</span>
+                                <span className="text-xs text-ink-muted flex-1">{item.desc}</span>
+                                <ChevronRight size={13} className="shrink-0 text-ink-faint" />
+                              </button>
+                            ))}
+                            <div className="my-1 border-t border-line" />
+                            <button onClick={() => handleAdminAction('update')}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-hover transition-colors"
+                            >
+                              <span className="font-mono text-xs text-brand w-20 shrink-0">/update</span>
+                              <span className="text-xs text-ink-muted">Hermes updaten</span>
+                            </button>
+                            <button onClick={() => handleAdminAction('restart')}
+                              className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-hover transition-colors"
+                            >
+                              <span className="font-mono text-xs text-brand w-20 shrink-0">/restart</span>
+                              <span className="text-xs text-ink-muted">Gateway neustarten</span>
+                            </button>
+                          </div>
+                        ) : cmdSubmenu === 'model' ? (
+                          <div className="p-3">
+                            <button onClick={() => setCmdSubmenu(null)}
+                              className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink mb-3"
+                            >
+                              <ChevronLeft size={13} /> Zurück
+                            </button>
+                            <div className="text-xs text-ink-muted mb-1.5">Modellname</div>
+                            <input
+                              autoFocus
+                              value={modelInput}
+                              onChange={e => setModelInput(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && handleModelConfirm()}
+                              placeholder="z. B. claude-opus-4-8"
+                              className="w-full bg-app border border-line rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-brand"
+                            />
+                            <button onClick={handleModelConfirm}
+                              className="mt-2 w-full py-2 rounded-xl bg-brand text-white text-sm font-medium hover:bg-brand-strong transition-colors"
+                            >
+                              Vormerken
+                            </button>
+                            <p className="mt-2.5 text-[11px] text-ink-muted leading-snug">
+                              ⏰ Wirkt erst ab nächstem Chat-Start (Gateway-Config anpassen).
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="p-3">
+                            <button onClick={() => setCmdSubmenu(null)}
+                              className="flex items-center gap-1.5 text-xs text-ink-muted hover:text-ink mb-3"
+                            >
+                              <ChevronLeft size={13} /> Zurück
+                            </button>
+                            <div className="text-xs text-ink-muted mb-1.5">Denktiefe (Reasoning)</div>
+                            {(['auto', 'low', 'medium', 'high'] as const).map(level => (
+                              <button key={level} onClick={() => handleReasoningSelect(level)}
+                                className="w-full text-left px-3 py-2 rounded-xl hover:bg-surface-hover text-sm capitalize transition-colors"
+                              >
+                                {level}
+                              </button>
+                            ))}
+                            <p className="mt-2 text-[11px] text-ink-muted leading-snug">
+                              ⏰ Wirkt erst ab nächstem Chat-Start.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Hidden picker + plus button */}
                   <input
                     ref={fileInputRef}
@@ -866,7 +1093,7 @@ export default function HermesChat() {
                     className="flex-1 min-w-0 bg-app border border-line rounded-2xl px-4 md:px-5 py-3 text-base md:text-sm focus:outline-none focus:border-brand"
                   />
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={(!input.trim() && pending.length === 0) || isLoading}
                     className="shrink-0 w-11 h-11 md:w-auto md:px-6 rounded-2xl bg-brand text-white disabled:opacity-50 flex items-center justify-center hover:bg-brand-strong transition-colors"
                   >
